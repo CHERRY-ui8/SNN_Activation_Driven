@@ -147,11 +147,43 @@ SNN_Activation_Driven/
 ├─ results/            # 实验结果表格（CSV文件）
 ├─ reports/            # 项目报告与图表
 ├─ environment.yml     # Conda环境配置文件
-└─ surrogate.py        # spikingjelly替代梯度库文件（如需要）
+└─ surrogate.py        # spikingjelly替代梯度库文件
 ```
 
 
-## 五、注意事项
+## 五、数据下载指南
+
+本项目使用两个数据集：**CIFAR10**（静态图像）和**CIFAR10DVS**（神经形态事件流）。数据集会在首次运行时自动下载，也可手动下载。
+
+### 1. CIFAR10数据集
+
+- 首次运行训练脚本时，`torchvision`会自动从官方源下载CIFAR10数据集
+- 下载位置：`./data/CIFAR10/`
+- 数据集大小：约170MB
+- 下载源：PyTorch官方镜像（通常较快）
+
+### 2. CIFAR10DVS数据集
+
+- 首次运行CIFAR10DVS训练脚本时，`spikingjelly`库会自动下载数据集
+- 下载位置：`./data/CIFAR10DVS/`
+- 数据集大小：约1.2GB（较大，建议确保网络稳定）
+- 下载源：SpikingJelly官方维护的镜像
+
+### 3. 数据集目录结构
+
+下载完成后，`./data/`目录结构应如下：
+```
+data/
+├─ CIFAR10/
+│  └─ cifar-10-batches-py/
+│     ├─ data_batch_1
+│     ├─ data_batch_2
+│     ├─ ...
+│     └─ test_batch
+└─ CIFAR10DVS/
+   └─ [CIFAR10DVS数据文件]
+```
+## 六、注意事项
 1. **环境激活**：运行训练脚本前，请确保已激活conda环境：
    ```bash
    conda activate snn_oss
