@@ -1,0 +1,121 @@
+Network:
+  epochs: 500
+  batch_size: 50
+  n_steps: 16
+  dataset: "CIFAR100"
+  data_path: "../datasets/CIFAR100"
+  log_path: "../logs/cifar100_custom"
+  backend: "python"
+  optimizer: "SGD"
+  lr: 0.06
+  weight_decay: 0.0005
+  avg_spike_init: 1.2
+  loss: "count"
+  norm_grad: 0
+  gradient_type: "exponential"
+  forward_type: "leaky"
+  pooling_type: "adjusted_avg"
+  n_class: 100
+  desired_count: 15
+  undesired_count: 1
+  tau_m: 10
+  tau_s: 6
+  tau_grad: 5.5
+  encoding: "None"
+
+Layers:
+  # 注意：这里需要实现卷积层才能使用
+  # 当前配置为示例，实际使用时需要添加卷积层实现
+  conv_1:
+    type: "conv"
+    in_channels: 3
+    out_channels: 128
+    kernel_size: 3
+    padding: 1
+    threshold: 1
+
+  conv_2:
+    type: "conv"
+    in_channels: 128
+    out_channels: 128
+    kernel_size: 3
+    padding: 1
+    threshold: 1
+
+  pooling_1:
+    type: "pooling"
+    kernel_size: 2
+
+  conv_3:
+    type: "conv"
+    in_channels: 128
+    out_channels: 256
+    kernel_size: 3
+    padding: 1
+    threshold: 1
+
+  conv_4:
+    type: "conv"
+    in_channels: 256
+    out_channels: 256
+    kernel_size: 3
+    padding: 1
+    threshold: 1
+
+  conv_5:
+    type: "conv"
+    in_channels: 256
+    out_channels: 256
+    kernel_size: 3
+    padding: 1
+    threshold: 1
+
+  pooling_2:
+    type: "pooling"
+    kernel_size: 2
+
+  conv_6:
+    type: "conv"
+    in_channels: 256
+    out_channels: 512
+    kernel_size: 3
+    padding: 1
+    threshold: 1
+
+  conv_7:
+    type: "conv"
+    in_channels: 512
+    out_channels: 512
+    kernel_size: 3
+    padding: 1
+    threshold: 1
+  
+  conv_8:
+    type: "conv"
+    in_channels: 512
+    out_channels: 512
+    kernel_size: 3
+    padding: 1
+    threshold: 1
+  
+  pooling_3:
+    type: "pooling"
+    kernel_size: 2
+
+  FC_1:
+    type: "linear"
+    n_inputs: 8192
+    n_outputs: 2048
+    threshold: 1
+
+  FC_2:
+    type: "linear"
+    n_inputs: 2048
+    n_outputs: 2048
+    threshold: 1
+
+  output:
+    type: "linear"
+    n_inputs: 2048
+    n_outputs: 100
+    threshold: 1

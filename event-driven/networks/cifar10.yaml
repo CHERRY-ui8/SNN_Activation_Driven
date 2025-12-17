@@ -1,0 +1,62 @@
+Network:
+  epochs: 200
+  batch_size: 50
+  n_steps: 12
+  dataset: "CIFAR10"
+  data_path: "../datasets/CIFAR10"
+  log_path: "../logs/cifar10_custom"
+  backend: "python"
+  optimizer: "SGD"
+  lr: 0.05
+  weight_decay: 0.0005
+  loss: "count"
+  norm_grad: 0
+  gradient_type: "exponential"
+  forward_type: "leaky"
+  pooling_type: "adjusted_avg"
+  n_class: 10
+  desired_count: 10
+  undesired_count: 1
+  tau_m: 7
+  tau_s: 4
+  tau_grad: 3.5
+  encoding: "None"
+
+Layers:
+  # 注意：这里需要实现卷积层才能使用
+  # 当前配置为示例，实际使用时需要添加卷积层实现
+  conv_1:
+    type: "conv"
+    in_channels: 3
+    out_channels: 128
+    kernel_size: 3
+    padding: 1
+    threshold: 1
+
+  pooling_1:
+    type: "pooling"
+    kernel_size: 2
+
+  conv_2:
+    type: "conv"
+    in_channels: 128
+    out_channels: 256
+    kernel_size: 3
+    padding: 1
+    threshold: 1
+
+  pooling_2:
+    type: "pooling"
+    kernel_size: 2
+
+  FC_1:
+    type: "linear"
+    n_inputs: 8192
+    n_outputs: 2048
+    threshold: 1
+
+  output:
+    type: "linear"
+    n_inputs: 2048
+    n_outputs: 10
+    threshold: 1

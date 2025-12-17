@@ -1,0 +1,35 @@
+Network:
+  epochs: 50
+  batch_size: 64
+  n_steps: 5
+  dataset: "MNIST"
+  data_path: "../datasets/mnist"
+  log_path: "../logs/mnist_mlp_custom"
+  backend: "python"
+  optimizer: "AdamW"
+  lr: 0.0005
+  weight_decay: 0.0005
+  avg_spike_init: 0.5
+  loss: "count"
+  gradient_type: "exponential"
+  forward_type: "leaky"
+  n_class: 10
+  desired_count: 5
+  undesired_count: 1
+  tau_m: 5
+  tau_s: 3
+  tau_grad: 2.5
+  encoding: "None"  # 使用直接编码，不使用TTFS
+
+Layers:
+  hidden:
+    type: "linear"
+    n_inputs: 784
+    n_outputs: 300
+    threshold: 1
+
+  output:
+    type: "linear"
+    n_inputs: 300
+    n_outputs: 10
+    threshold: 1
