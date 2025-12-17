@@ -1,0 +1,18 @@
+name: snn_oss
+channels:
+  - pytorch
+  - nvidia
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - pip
+  - pytorch::pytorch
+  - pytorch::torchvision
+  - pytorch::torchaudio
+  - pip:
+    - spikingjelly==0.0.0.0.14
+    - pandas
+    - matplotlib
+    - tensorboard
+
