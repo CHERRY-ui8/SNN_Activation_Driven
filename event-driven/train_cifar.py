@@ -33,44 +33,47 @@ from layers.pooling_custom import PoolLayer
 from layers.losses_custom import SpikeLoss
 
 
-def _load_original_layers(project_root, my_impl_dir):
-    """加载原始实现的卷积层和dropout层，避免与自定义layers冲突"""
+def _load_original_layers():
+    """加载原始实现的卷积层和dropout层（只从my_implementation目录加载）"""
     import importlib.util
     import types
     
-    # 调整路径优先级：项目根目录优先于 my_implementation
-    for path in [my_impl_dir, project_root]:
-        if path in sys.path:
-            sys.path.remove(path)
-    sys.path.insert(0, project_root)
+    # 只使用 my_implementation 目录
+    my_impl_dir = os.path.dirname(os.path.abspath(__file__))
     
-    # 清理已缓存的 layers 模块
+    # 确保 my_impl_dir 在路径中
+    if my_impl_dir not in sys.path:
+        sys.path.insert(0, my_impl_dir)
+    
+    # 清理已缓存的 layers 和 global_v 模块
     for mod_name in [k for k in sys.modules.keys() if k.startswith('layers')]:
         del sys.modules[mod_name]
+    if 'global_v' in sys.modules:
+        del sys.modules['global_v']
     sys.modules['layers'] = types.ModuleType('layers')
     
-    # 加载依赖
-    import global_v as glv_original
+    sys.modules['global_v'] = glv
     
     # 辅助函数：加载并注册模块
     def _load_module(name, file_path):
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"Cannot find module file: {file_path}")
         spec = importlib.util.spec_from_file_location(name, file_path)
         module = importlib.util.module_from_spec(spec)
         sys.modules[name] = module
         spec.loader.exec_module(module)
         return module
     
-    # 按依赖顺序加载
-    layers_dir = os.path.join(project_root, 'layers')
+    # 按依赖顺序加载，只从 my_implementation/layers 目录加载
+    layers_dir = os.path.join(my_impl_dir, 'layers')
     _load_module('layers.functions', os.path.join(layers_dir, 'functions.py'))
     conv = _load_module('layers.conv', os.path.join(layers_dir, 'conv.py'))
     dropout = _load_module('layers.dropout', os.path.join(layers_dir, 'dropout.py'))
     
-    sys.path.insert(1, my_impl_dir)  # 恢复 my_implementation 到路径
-    return conv, dropout, glv_original
+    return conv, dropout
 
 
-conv, dropout, glv_original = _load_original_layers(project_root, my_impl_dir)
+conv, dropout = _load_original_layers()
 
 class CIFARNetwork(nn.Module):
     """支持卷积层的CIFAR网络"""
@@ -261,9 +264,7 @@ def main():
     glv.rank = 0 if torch.cuda.is_available() else -1
     glv.init(network_config, layers_config)
     
-    # 初始化原始全局变量
-    glv_original.rank = 0 if torch.cuda.is_available() else 0
-    glv_original.init(network_config, layers_config)
+    # glv 已经在上面初始化过了，原始层会使用同一个 glv
     print(f'Using device: {device}')
     
     # 加载数据
@@ -324,7 +325,6 @@ def main():
     # 初始化每一层
     network.eval()
     glv.init_flag = True
-    glv_original.init_flag = True
     with torch.no_grad():
         x = init_inputs
         for i, layer in enumerate(network.layers):
@@ -349,7 +349,6 @@ def main():
                 # Dropout层不需要初始化
                 continue
     glv.init_flag = False
-    glv_original.init_flag = False
     network.train()
     print("Weight initialization completed.")
     

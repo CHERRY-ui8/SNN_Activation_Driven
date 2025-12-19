@@ -51,7 +51,7 @@ Layers:
 
   FC_1:
     type: "linear"
-    n_inputs: 8192
+    n_inputs: 16384  # 256 channels * 8 * 8 after 2 poolings
     n_outputs: 2048
     threshold: 1
 
