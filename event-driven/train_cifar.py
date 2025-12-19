@@ -9,7 +9,6 @@ import shutil
 import argparse
 from datetime import datetime
 
-# 添加项目根目录到路径
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
@@ -20,21 +19,113 @@ import torch.backends.cudnn as cudnn
 import torchvision
 import torchvision.transforms as transforms
 import numpy as np
-import json
 from torch.utils.tensorboard import SummaryWriter
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.nn.utils import clip_grad_norm_
 from sklearn.metrics import confusion_matrix
 
 # 导入自定义模块
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from utils_custom import glv, preprocess_inputs
+my_impl_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, my_impl_dir)
+from utils_custom import glv, preprocess_inputs, initialize_layer
 from layers.linear_custom import LinearLayer
 from layers.pooling_custom import PoolLayer
 from layers.losses_custom import SpikeLoss
 
-# 注意：这里需要实现卷积层才能完整训练CIFAR
-# 当前版本仅作为框架，实际使用时需要添加卷积层实现
+
+def _load_original_layers(project_root, my_impl_dir):
+    """加载原始实现的卷积层和dropout层，避免与自定义layers冲突"""
+    import importlib.util
+    import types
+    
+    # 调整路径优先级：项目根目录优先于 my_implementation
+    for path in [my_impl_dir, project_root]:
+        if path in sys.path:
+            sys.path.remove(path)
+    sys.path.insert(0, project_root)
+    
+    # 清理已缓存的 layers 模块
+    for mod_name in [k for k in sys.modules.keys() if k.startswith('layers')]:
+        del sys.modules[mod_name]
+    sys.modules['layers'] = types.ModuleType('layers')
+    
+    # 加载依赖
+    import global_v as glv_original
+    
+    # 辅助函数：加载并注册模块
+    def _load_module(name, file_path):
+        spec = importlib.util.spec_from_file_location(name, file_path)
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[name] = module
+        spec.loader.exec_module(module)
+        return module
+    
+    # 按依赖顺序加载
+    layers_dir = os.path.join(project_root, 'layers')
+    _load_module('layers.functions', os.path.join(layers_dir, 'functions.py'))
+    conv = _load_module('layers.conv', os.path.join(layers_dir, 'conv.py'))
+    dropout = _load_module('layers.dropout', os.path.join(layers_dir, 'dropout.py'))
+    
+    sys.path.insert(1, my_impl_dir)  # 恢复 my_implementation 到路径
+    return conv, dropout, glv_original
+
+
+conv, dropout, glv_original = _load_original_layers(project_root, my_impl_dir)
+
+class CIFARNetwork(nn.Module):
+    """支持卷积层的CIFAR网络"""
+    def __init__(self, layers_config):
+        super(CIFARNetwork, self).__init__()
+        self.layers = nn.ModuleList()
+        
+        for key, config in layers_config.items():
+            if config['type'] == 'conv':
+                layer = conv.ConvLayer(glv.network_config, config, key)
+                self.layers.append(layer)
+            elif config['type'] == 'linear':
+                layer = LinearLayer(glv.network_config, config, key)
+                self.layers.append(layer)
+            elif config['type'] == 'pooling':
+                layer = PoolLayer(glv.network_config, config, key)
+                self.layers.append(layer)
+            elif config['type'] == 'dropout':
+                layer = dropout.DropoutLayer(config, key)
+                self.layers.append(layer)
+            else:
+                raise ValueError(f"Unknown layer type: {config['type']}")
+        
+        print("Network structure created")
+        print("-----------------------------------------")
+    
+    def forward(self, x, labels=None):
+        """前向传播"""
+        # x shape: (T, batch_size, C, H, W) for conv layers
+        for i, layer in enumerate(self.layers):
+            # 检查是否是dropout层
+            if hasattr(layer, 'type') and layer.type == 'dropout':
+                # 原始DropoutLayer会根据glv.init_flag和training状态自动处理
+                x = layer(x)
+            elif i == len(self.layers) - 1:
+                # 最后一层（输出层）需要labels
+                # 如果是线性层，需要展平
+                if hasattr(layer, 'type') and layer.type == 'linear':
+                    # 展平卷积输出: (T, batch_size, C, H, W) -> (T, batch_size, C*H*W)
+                    if len(x.shape) == 5:
+                        T, batch_size, C, H, W = x.shape
+                        x = x.view(T, batch_size, C * H * W)
+                x = layer(x, labels)
+            else:
+                # 隐藏层：conv, pooling, linear（非最后一层）
+                # 如果是线性层且输入是5D，需要先展平
+                if hasattr(layer, 'type') and layer.type == 'linear':
+                    if len(x.shape) == 5:
+                        T, batch_size, C, H, W = x.shape
+                        flattened_size = C * H * W
+                        x = x.view(T, batch_size, flattened_size)
+                # 调用层的forward方法
+                # 原始卷积层和池化层不需要labels参数
+                x = layer(x)
+        return x
 
 
 def get_loss(err, outputs, labels, network_config):
@@ -104,12 +195,11 @@ def train_epoch(network, trainloader, optimizer, epoch, network_config, device, 
     return acc, avg_loss
 
 
-def test_epoch(network, testloader, epoch, network_config, device, err):
+def test_epoch(network, testloader, epoch, network_config, device):
     """测试一个epoch"""
     network.eval()
     correct = 0
     total = 0
-    test_loss = 0
     T = network_config['n_steps']
     n_class = network_config['n_class']
     y_pred = []
@@ -126,10 +216,6 @@ def test_epoch(network, testloader, epoch, network_config, device, err):
             # 前向传播
             outputs = network(inputs, None)
             
-            # 计算损失
-            loss = get_loss(err, outputs, labels, network_config)
-            test_loss += loss.item()
-            
             # 统计
             spike_counts = readout(outputs, T)
             predicted = torch.argmax(spike_counts, dim=1)
@@ -140,7 +226,6 @@ def test_epoch(network, testloader, epoch, network_config, device, err):
             y_true.append(labels.cpu().numpy())
     
     acc = 100.0 * correct / total
-    avg_loss = test_loss / len(testloader)
     y_pred = np.concatenate(y_pred)
     y_true = np.concatenate(y_true)
     
@@ -148,7 +233,7 @@ def test_epoch(network, testloader, epoch, network_config, device, err):
     nums = np.bincount(y_true)
     confusion = confusion_matrix(y_true, y_pred, labels=np.arange(n_class)) / nums.reshape(-1, 1)
     
-    return acc, avg_loss, confusion
+    return acc, confusion
 
 
 def main():
@@ -171,10 +256,14 @@ def main():
     layers_config = config['Layers']
     
     # 初始化全局变量
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    # rank用于指定GPU设备ID，0表示第一个GPU，-1表示CPU（但原始实现可能不支持）
     glv.rank = 0 if torch.cuda.is_available() else -1
     glv.init(network_config, layers_config)
     
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    # 初始化原始全局变量
+    glv_original.rank = 0 if torch.cuda.is_available() else 0
+    glv_original.init(network_config, layers_config)
     print(f'Using device: {device}')
     
     # 加载数据
@@ -220,14 +309,49 @@ def main():
         shuffle=False, num_workers=4, pin_memory=True
     )
     
-    print("Note: This script requires convolutional layer implementation.")
-    print("Please implement ConvLayer in layers/conv_custom.py to use this script.")
-    print("For now, this is a framework that can be extended.")
+    # 创建网络
+    network = CIFARNetwork(layers_config).to(device)
     
-    # 创建日志目录
-    log_dir = f"{network_config['log_path']}_{datetime.now().strftime('%Y%m%d-%H%M%S')}/"
-    os.makedirs(log_dir, exist_ok=True)
-    shutil.copyfile(args.config, os.path.join(log_dir, 'config.yaml'))
+    # 权重初始化（关键步骤！）
+    print("Initializing weights...")
+    batch_size = network_config['batch_size']
+    T = network_config['n_steps']
+    # 获取一个批次的数据用于初始化
+    init_inputs, _ = next(iter(trainloader))
+    init_inputs = init_inputs[:batch_size].to(device)
+    init_inputs = preprocess_inputs(init_inputs, network_config, T)
+    
+    # 初始化每一层
+    network.eval()
+    glv.init_flag = True
+    glv_original.init_flag = True
+    with torch.no_grad():
+        x = init_inputs
+        for i, layer in enumerate(network.layers):
+            if hasattr(layer, 'type'):
+                if layer.type == 'linear':
+                    # 如果是线性层，需要先展平
+                    if len(x.shape) == 5:
+                        T, batch_size, C, H, W = x.shape
+                        flattened_size = C * H * W
+                        x = x.view(T, batch_size, flattened_size)
+                    x = initialize_layer(layer, x)
+                elif layer.type == 'conv':
+                    # 原始卷积层的初始化在forward中处理
+                    x = layer(x)
+                elif layer.type == 'pooling':
+                    # 池化层直接前向传播
+                    x = layer(x)
+                elif layer.type == 'dropout':
+                    # Dropout层在初始化时跳过
+                    continue
+            elif isinstance(layer, (nn.Dropout3d, nn.Dropout)):
+                # Dropout层不需要初始化
+                continue
+    glv.init_flag = False
+    glv_original.init_flag = False
+    network.train()
+    print("Weight initialization completed.")
     
     # 创建损失函数
     err = SpikeLoss().to(device)
@@ -237,72 +361,80 @@ def main():
     lr = network_config['lr']
     weight_decay = network_config['weight_decay']
     
+    # 收集需要优化的参数（原始实现中，卷积层和线性层有不同的参数组）
+    norm_param, param = [], []
+    for layer in network.modules():
+        if hasattr(layer, 'type'):
+            if layer.type in ['conv', 'linear']:
+                if hasattr(layer, 'norm_weight') and hasattr(layer, 'norm_bias'):
+                    norm_param.extend([layer.norm_weight, layer.norm_bias])
+                if hasattr(layer, 'weight'):
+                    param.append(layer.weight)
+    
+    norm_grad = network_config.get('norm_grad', 1)
     if optim_type == 'SGD':
-        optimizer = torch.optim.SGD([], lr=lr, weight_decay=weight_decay)  # 空参数列表，因为网络未创建
+        optimizer = torch.optim.SGD([
+            {'params': param},
+            {'params': norm_param, 'lr': lr * norm_grad}
+        ], lr=lr, weight_decay=weight_decay)
     elif optim_type == 'Adam':
-        optimizer = torch.optim.Adam([], lr=lr, weight_decay=weight_decay)
+        optimizer = torch.optim.Adam([
+            {'params': param},
+            {'params': norm_param, 'lr': lr * norm_grad}
+        ], lr=lr, weight_decay=weight_decay)
     elif optim_type == 'AdamW':
-        optimizer = torch.optim.AdamW([], lr=lr, weight_decay=weight_decay)
+        optimizer = torch.optim.AdamW([
+            {'params': param},
+            {'params': norm_param, 'lr': lr * norm_grad}
+        ], lr=lr, weight_decay=weight_decay)
     else:
         raise ValueError(f"Unknown optimizer: {optim_type}")
     
     # 学习率调度器
     scheduler = CosineAnnealingLR(optimizer, T_max=network_config['epochs'])
     
+    # 创建日志目录
+    log_dir = f"{network_config['log_path']}_{datetime.now().strftime('%Y%m%d-%H%M%S')}/"
+    os.makedirs(log_dir, exist_ok=True)
+    shutil.copyfile(args.config, os.path.join(log_dir, 'config.yaml'))
+    
     writer = SummaryWriter(log_dir)
     best_acc = 0
-    best_epoch = 0
-    training_results = []
     
-    # 注意：以下训练循环需要网络实现才能运行
-    # 这里仅作为框架，保持与 train_mnist.py 的一致性
-    print(f"Log directory: {log_dir}")
-    print("CIFAR training framework created. Implement ConvLayer to complete.")
-    print("Training loop structure is ready for loss recording and JSON saving.")
+    # 训练循环
+    print("Starting training...")
+    for epoch in range(1, network_config['epochs'] + 1):
+        train_acc, train_loss = train_epoch(network, trainloader, optimizer, epoch, network_config, device, err)
+        test_acc, confusion = test_epoch(network, testloader, epoch, network_config, device)
+        
+        scheduler.step()
+        
+        print(f'Epoch [{epoch}/{network_config["epochs"]}]: '
+              f'Train Acc: {train_acc:.2f}%, Test Acc: {test_acc:.2f}%, Loss: {train_loss:.4f}')
+        
+        # 记录到tensorboard
+        writer.add_scalar('Accuracy/Train', train_acc, epoch)
+        writer.add_scalar('Accuracy/Test', test_acc, epoch)
+        writer.add_scalar('Loss/Train', train_loss, epoch)
+        
+        # 保存模型
+        state = {
+            'net': network.state_dict(),
+            'epoch': epoch,
+            'test_acc': test_acc,
+        }
+        torch.save(state, os.path.join(log_dir, 'last.pth'))
+        
+        if test_acc > best_acc:
+            best_acc = test_acc
+            torch.save(state, os.path.join(log_dir, 'best.pth'))
+            print(f'New best accuracy: {best_acc:.2f}%')
+        
+        # 保存混淆矩阵
+        np.save(os.path.join(log_dir, f'confusion_epoch_{epoch}.npy'), confusion)
     
-    # 示例：如果网络已创建，训练循环应该如下：
-    # for epoch in range(1, network_config['epochs'] + 1):
-    #     train_acc, train_loss = train_epoch(network, trainloader, optimizer, epoch, network_config, device, err)
-    #     test_acc, test_loss, confusion = test_epoch(network, testloader, epoch, network_config, device, err)
-    #     
-    #     scheduler.step()
-    #     
-    #     print(f'Epoch [{epoch}/{network_config["epochs"]}]: '
-    #           f'Train Acc: {train_acc:.2f}%, Test Acc: {test_acc:.2f}%, '
-    #           f'Train Loss: {train_loss:.4f}, Test Loss: {test_loss:.4f}')
-    #     
-    #     # 记录到tensorboard
-    #     writer.add_scalar('Accuracy/Train', train_acc, epoch)
-    #     writer.add_scalar('Accuracy/Test', test_acc, epoch)
-    #     writer.add_scalar('Loss/Train', train_loss, epoch)
-    #     writer.add_scalar('Loss/Test', test_loss, epoch)
-    #     
-    #     # 保存结果到列表
-    #     training_results.append({
-    #         'epoch': epoch,
-    #         'train_loss': float(train_loss),
-    #         'train_acc': float(train_acc),
-    #         'test_loss': float(test_loss),
-    #         'test_acc': float(test_acc)
-    #     })
-    #     
-    #     if test_acc > best_acc:
-    #         best_acc = test_acc
-    #         best_epoch = epoch
-    #     
-    #     # 保存混淆矩阵
-    #     np.save(os.path.join(log_dir, f'confusion_epoch_{epoch}.npy'), confusion)
-    # 
-    # # 保存训练结果到JSON文件
-    # results_dict = {
-    #     'epochs': training_results,
-    #     'best_epoch': best_epoch,
-    #     'best_test_acc': float(best_acc)
-    # }
-    # with open(os.path.join(log_dir, 'training_results.json'), 'w') as f:
-    #     json.dump(results_dict, f, indent=2)
-    # 
-    # writer.close()
+    print(f'Training completed! Best test accuracy: {best_acc:.2f}%')
+    writer.close()
 
 
 if __name__ == '__main__':
