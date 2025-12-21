@@ -42,10 +42,14 @@ class ResultAnalyzer:
         """加载模型检查点"""
         checkpoint_path = self.log_dir / checkpoint_name
         if checkpoint_path.exists():
-            checkpoint = torch.load(checkpoint_path, map_location='cpu')
+            checkpoint = torch.load(checkpoint_path, map_location='cpu', weights_only=False)
             print(f"加载检查点: {checkpoint_name}")
             print(f"  Epoch: {checkpoint['epoch']}")
-            print(f"  准确率: {checkpoint.get('accuracy', 'N/A'):.2f}%")
+            accuracy = checkpoint.get('accuracy', 'N/A')
+            if isinstance(accuracy, (int, float)):
+                print(f"  准确率: {accuracy:.2f}%")
+            else:
+                print(f"  准确率: {accuracy}")
             return checkpoint
         else:
             print(f"检查点不存在: {checkpoint_path}")
@@ -86,10 +90,21 @@ class ResultAnalyzer:
             
             fig, axes = plt.subplots(2, 2, figsize=(15, 10))
             
-            # 绘制准确率曲线
-            if 'Accuracy/Train' in scalars and 'Accuracy/Test' in scalars:
-                train_acc = ea.Scalars('Accuracy/Train')
-                test_acc = ea.Scalars('Accuracy/Test')
+            # 绘制准确率曲线（支持多种标签格式）
+            train_acc_tag = None
+            test_acc_tag = None
+            if 'Train/Avg_Acc' in scalars and 'Test/Avg_Acc' in scalars:
+                # Baseline训练脚本的标签格式
+                train_acc_tag = 'Train/Avg_Acc'
+                test_acc_tag = 'Test/Avg_Acc'
+            elif 'Accuracy/Train' in scalars and 'Accuracy/Test' in scalars:
+                # 其他训练脚本的标签格式
+                train_acc_tag = 'Accuracy/Train'
+                test_acc_tag = 'Accuracy/Test'
+            
+            if train_acc_tag and test_acc_tag:
+                train_acc = ea.Scalars(train_acc_tag)
+                test_acc = ea.Scalars(test_acc_tag)
                 
                 epochs = [s.step for s in train_acc]
                 train_values = [s.value for s in train_acc]
@@ -98,14 +113,21 @@ class ResultAnalyzer:
                 axes[0, 0].plot(epochs, train_values, label='Train', linewidth=2)
                 axes[0, 0].plot(epochs, test_values, label='Test', linewidth=2)
                 axes[0, 0].set_xlabel('Epoch')
-                axes[0, 0].set_ylabel('Accuracy (%)')
+                axes[0, 0].set_ylabel('Accuracy')
                 axes[0, 0].set_title('Accuracy Curves')
                 axes[0, 0].legend()
                 axes[0, 0].grid(True, alpha=0.3)
             
-            # 绘制损失曲线
-            if 'Loss/Train' in scalars:
-                train_loss = ea.Scalars('Loss/Train')
+            # 绘制损失曲线（支持多种标签格式）
+            train_loss_tag = None
+            test_loss_tag = None
+            if 'Train/Avg_Loss' in scalars:
+                train_loss_tag = 'Train/Avg_Loss'
+            elif 'Loss/Train' in scalars:
+                train_loss_tag = 'Loss/Train'
+            
+            if train_loss_tag:
+                train_loss = ea.Scalars(train_loss_tag)
                 epochs = [s.step for s in train_loss]
                 values = [s.value for s in train_loss]
                 
@@ -117,9 +139,23 @@ class ResultAnalyzer:
                 axes[0, 1].grid(True, alpha=0.3)
                 axes[0, 1].set_yscale('log')
             
+            # 绘制测试损失曲线（如果存在）
+            if 'Test/Avg_Loss' in scalars:
+                test_loss = ea.Scalars('Test/Avg_Loss')
+                test_loss_epochs = [s.step for s in test_loss]
+                test_loss_values = [s.value for s in test_loss]
+                axes[0, 1].plot(test_loss_epochs, test_loss_values, label='Test Loss', linewidth=2, color='orange')
+                axes[0, 1].legend()
+            
             # 绘制学习率曲线
-            if 'LearningRate' in scalars:
-                lr = ea.Scalars('LearningRate')
+            lr_tag = None
+            if 'Train/Learning_Rate' in scalars:
+                lr_tag = 'Train/Learning_Rate'
+            elif 'LearningRate' in scalars:
+                lr_tag = 'LearningRate'
+            
+            if lr_tag:
+                lr = ea.Scalars(lr_tag)
                 epochs = [s.step for s in lr]
                 values = [s.value for s in lr]
                 
@@ -130,12 +166,12 @@ class ResultAnalyzer:
                 axes[1, 0].grid(True, alpha=0.3)
             
             # 绘制准确率对比（训练 vs 测试）
-            if 'Accuracy/Train' in scalars and 'Accuracy/Test' in scalars:
+            if train_acc_tag and test_acc_tag:
                 axes[1, 1].plot(epochs, train_values, label='Train', linewidth=2, alpha=0.7)
                 axes[1, 1].plot(epochs, test_values, label='Test', linewidth=2, alpha=0.7)
                 axes[1, 1].fill_between(epochs, train_values, test_values, alpha=0.2)
                 axes[1, 1].set_xlabel('Epoch')
-                axes[1, 1].set_ylabel('Accuracy (%)')
+                axes[1, 1].set_ylabel('Accuracy')
                 axes[1, 1].set_title('Train vs Test Accuracy')
                 axes[1, 1].legend()
                 axes[1, 1].grid(True, alpha=0.3)
@@ -340,7 +376,11 @@ class ResultAnalyzer:
         if checkpoint:
             print(f"\n最佳模型信息:")
             print(f"  Epoch: {checkpoint['epoch']}")
-            print(f"  准确率: {checkpoint.get('accuracy', 'N/A'):.2f}%")
+            accuracy = checkpoint.get('accuracy', 'N/A')
+            if isinstance(accuracy, (int, float)):
+                print(f"  准确率: {accuracy:.2f}%")
+            else:
+                print(f"  准确率: {accuracy}")
         
         # 绘制训练曲线
         print("\n绘制训练曲线...")
