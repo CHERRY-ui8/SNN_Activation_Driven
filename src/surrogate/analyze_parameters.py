@@ -12,7 +12,7 @@ project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(_
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-from src.surrogate.surrogate_custom import SigmoidSurrogate, EsserSurrogate, SuperSpikeSurrogate
+from src.surrogate.surrogate_custom import SigmoidPrimeSurrogate, EsserSurrogate, SuperSpikeSurrogate
 
 def analyze_surrogate_gradients():
     """分析不同参数下的梯度分布"""
@@ -30,7 +30,7 @@ def analyze_surrogate_gradients():
     
     # 1. Sigmoid 分析
     print("\n【Sigmoid 替代梯度函数分析】")
-    print("公式: h(x) = β·s(x)·(1-s(x))，其中 s(x) = sigmoid(β·x)")
+    print("公式: h(x) = s(x)·(1-s(x))，其中 s(x) = sigmoid(β·x)")
     print("论文默认: β=10（但实际使用中需要根据输入范围调整）")
     print("-" * 80)
     print(f"{'Beta':<8} {'Max Grad':<12} {'Grad@0':<12} {'Grad@±1':<12} {'Effective Range':<20}")
@@ -38,7 +38,7 @@ def analyze_surrogate_gradients():
     
     sigmoid_results = []
     for beta in sigmoid_betas:
-        surr = SigmoidSurrogate(beta=beta)
+        surr = SigmoidPrimeSurrogate(beta=beta)
         y = surr(x)
         y.sum().backward()
         grad = x.grad.clone()

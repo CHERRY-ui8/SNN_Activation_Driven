@@ -114,8 +114,9 @@ def train_dvs_split_mode(
             optimizer.zero_grad()
             with torch.cuda.amp.autocast():
                 out_fr = net(img)  # img.shape=[N,T,2,32,32]
-                label_onehot = F.one_hot(label, 10).float()
-                loss = F.mse_loss(out_fr, label_onehot)
+                # label_onehot = F.one_hot(label, 10).float()
+                # loss = F.mse_loss(out_fr, label_onehot)
+                loss = F.cross_entropy(out_fr, label)
 
             scaler.scale(loss).backward()
             
@@ -149,8 +150,9 @@ def train_dvs_split_mode(
                 total_test_samples += batch_size
 
                 out_fr = net(img)
-                label_onehot = F.one_hot(label, 10).float()
-                loss = F.mse_loss(out_fr, label_onehot)
+                # label_onehot = F.one_hot(label, 10).float()
+                # loss = F.mse_loss(out_fr, label_onehot)
+                loss = F.cross_entropy(out_fr, label)
 
                 batch_acc, batch_avg_loss = calculate_metrics(out_fr, label, loss)
                 total_test_acc += batch_acc * batch_size

@@ -21,7 +21,7 @@ if project_root not in sys.path:
 # 导入自定义模块
 from src.models.model_cifar10_csnn import CIFAR10CSNN
 from src.data.data_cifar10 import load_cifar10
-from src.surrogate.surrogate_custom import SigmoidSurrogate, EsserSurrogate, SuperSpikeSurrogate
+from src.surrogate.surrogate_custom import SigmoidPrimeSurrogate, EsserSurrogate, SuperSpikeSurrogate
 from src.utils.utils import get_device, init_tensorboard, save_checkpoint, calculate_metrics, load_checkpoint
 
 def parse_args() -> argparse.Namespace:
@@ -35,7 +35,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--lr', default=0.1, type=float, help='初始学习率')
     parser.add_argument('--channels', default=32, type=int, help='第一层卷积通道数')
     # 数据与日志
-    parser.add_argument('--data_dir', default='./data/CIFAR10', type=str, help='CIFAR10目录')
+    parser.add_argument('--data_dir', default='./datasets/CIFAR10', type=str, help='CIFAR10目录')
     parser.add_argument('--log_dir', default='./logs/cifar10_surrogate_compare', type=str, help='日志目录')
     parser.add_argument('--save_result', default='./results/surrogate_compare_result.csv', type=str, help='对比结果保存路径（CSV）')
     return parser.parse_args()
@@ -108,33 +108,11 @@ def train_surrogate(
             optimizer.zero_grad()
             with torch.cuda.amp.autocast():
                 out_fr = net(img)
-                label_onehot = F.one_hot(label, 10).float()
-                loss = F.mse_loss(out_fr, label_onehot)
+                # label_onehot = F.one_hot(label, 10).float()
+                # loss = F.mse_loss(out_fr, label_onehot)
+                loss = F.cross_entropy(out_fr, label)
 
             scaler.scale(loss).backward()
-            
-            # 调试信息：检查梯度
-            if epoch == 0 and total_samples == batch_size:  # 只在第一个batch打印
-                print(f"\n[DEBUG Training] Loss: {loss.item():.6f}")
-                print(f"[DEBUG Training] Output mean: {out_fr.mean().item():.6f}, std: {out_fr.std().item():.6f}")
-                
-                # 检查模型参数的梯度
-                has_grad = False
-                grad_norm = 0.0
-                param_count = 0
-                for name, param in net.named_parameters():
-                    if param.grad is not None:
-                        has_grad = True
-                        grad_norm += param.grad.norm().item() ** 2
-                        param_count += 1
-                        if param_count <= 3:  # 只打印前3个参数
-                            print(f"[DEBUG Training] {name}: grad_norm={param.grad.norm().item():.6f}, param_norm={param.norm().item():.6f}")
-                
-                grad_norm = grad_norm ** 0.5
-                print(f"[DEBUG Training] Has gradient: {has_grad}, Total grad norm: {grad_norm:.6f}, Parameters with grad: {param_count}")
-                
-                # 检查输出是否有grad_fn
-                print(f"[DEBUG Training] out_fr requires_grad: {out_fr.requires_grad}, grad_fn: {out_fr.grad_fn}")
             
             scaler.step(optimizer)
             scaler.update()
@@ -163,8 +141,9 @@ def train_surrogate(
                 total_test_samples += batch_size
 
                 out_fr = net(img)
-                label_onehot = F.one_hot(label, 10).float()
-                loss = F.mse_loss(out_fr, label_onehot)
+                # label_onehot = F.one_hot(label, 10).float()
+                # loss = F.mse_loss(out_fr, label_onehot)
+                loss = F.cross_entropy(out_fr, label)
 
                 batch_acc, batch_avg_loss = calculate_metrics(out_fr, label, loss)
                 total_test_acc += batch_acc * batch_size
@@ -238,9 +217,9 @@ def main(args: argparse.Namespace):
     # NOTE: 
     surrogates = {
         'ATan_Default': ATan(),  # 默认
-        'Sigmoid': SigmoidSurrogate(beta=5.0),
-        'Esser': EsserSurrogate(beta=1.0),
-        'SuperSpike': SuperSpikeSurrogate(beta=2.0)
+        'Sigmoid': SigmoidPrimeSurrogate(),
+        'Esser': EsserSurrogate(),
+        'SuperSpike': SuperSpikeSurrogate()
     }
 
     # 4. 逐个训练替代梯度并记录结果
