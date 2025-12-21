@@ -30,13 +30,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--T', default=4, type=int, help='时间步长（脉冲序列长度）')
     parser.add_argument('--epochs', default=64, type=int, help='训练轮次')
     parser.add_argument('--batch_size', default=128, type=int, help='批量大小')
-    parser.add_argument('--lr', default=0.1, type=float, help='初始学习率')
+    parser.add_argument('--lr', default=0.05, type=float, help='初始学习率')
     parser.add_argument('--channels', default=32, type=int, help='第一层卷积输出通道数')
     parser.add_argument('--min_lr', default=1e-4, type=float, help='最小学习率（余弦退火的下界）')
     parser.add_argument('--grad_clip', default=1.0, type=float, help='梯度裁剪阈值（0表示不裁剪）')
-    parser.add_argument('--patience', default=10, type=int, help='早停耐心值（连续多少个epoch无提升则停止，0表示不早停）')
+    parser.add_argument('--patience', default=5, type=int, help='早停耐心值（连续多少个epoch无提升则停止，0表示不早停）')
     # 数据与日志
-    parser.add_argument('--data_dir', default='./data/CIFAR10', type=str, help='CIFAR10数据集目录')
+    parser.add_argument('--data_dir', default='./datasets/CIFAR10', type=str, help='CIFAR10数据集目录')
     parser.add_argument('--log_dir', default='./logs/cifar10_baseline', type=str, help='日志保存目录')
     parser.add_argument('--resume', default='', type=str, help='恢复训练的checkpoint路径（可选）')
     return parser.parse_args()
@@ -70,8 +70,9 @@ def train_one_epoch(
             # 前向传播：计算平均发放率
             out_fr = net(img)
             # 激活驱动损失：MSE损失（最小化发放率与目标one-hot向量的差距）
-            label_onehot = F.one_hot(label, num_classes=10).float()  # 转为one-hot
-            loss = F.mse_loss(out_fr, label_onehot)
+            # label_onehot = F.one_hot(label, num_classes=10).float()  # 转为one-hot
+            # loss = F.mse_loss(out_fr, label_onehot)
+            loss = F.cross_entropy(out_fr, label)
 
         # 反向传播与优化
         scaler.scale(loss).backward()  # 梯度缩放
@@ -132,8 +133,9 @@ def test_one_epoch(
             # 前向传播
             out_fr = net(img)
             # 计算损失
-            label_onehot = F.one_hot(label, num_classes=10).float()
-            loss = F.mse_loss(out_fr, label_onehot)
+            # label_onehot = F.one_hot(label, num_classes=10).float()
+            # loss = F.mse_loss(out_fr, label_onehot)
+            loss = F.cross_entropy(out_fr, label)
 
             # 计算批量指标
             batch_acc, batch_avg_loss = calculate_metrics(out_fr, label, loss)

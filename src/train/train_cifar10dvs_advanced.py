@@ -28,7 +28,8 @@ def train_one_epoch(net, train_loader, optimizer, scaler, device, epoch, writer)
     correct = 0
     total = 0
     
-    criterion = torch.nn.MSELoss()
+    # criterion = torch.nn.MSELoss()
+    criterion = torch.nn.CrossEntropyLoss()
     
     for batch_idx, (img, label) in enumerate(train_loader):
         img = img.to(device)  # [N, T, C, H, W]
@@ -69,7 +70,8 @@ def test_one_epoch(net, test_loader, device, epoch, writer):
     correct = 0
     total = 0
     
-    criterion = torch.nn.MSELoss()
+    # criterion = torch.nn.MSELoss()
+    criterion = torch.nn.CrossEntropyLoss()
     
     with torch.no_grad():
         for img, label in test_loader:
