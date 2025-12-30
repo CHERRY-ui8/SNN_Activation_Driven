@@ -118,12 +118,11 @@ def calculate_metrics(
         loss: current batch loss (scalar)
     Returns:
         acc: accuracy (0~1)
-        avg_loss: average loss (loss/batch size)
+        avg_loss: average loss (per-batch mean loss)
     """
-    batch_size = label.numel()  # batch size
     # calculate accuracy: predicted class = class with highest firing rate
     pred = out_fr.argmax(dim=1)  # predicted class, shape=[N]
-    acc = (pred == label).float().sum().item() / batch_size  # accuracy
-    # calculate average loss
-    avg_loss = loss.item() / batch_size  # loss divided by batch size
-    return acc, avg_loss
+    acc = (pred == label).float().mean().item()  # accuracy
+    # NOTE: torch loss functions like CrossEntropyLoss default to reduction='mean'
+    # so loss.item() is already the mean loss over the batch.
+    return acc, loss.item()

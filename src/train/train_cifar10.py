@@ -10,7 +10,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.cuda.amp import GradScaler  # mixed precision training
-from spikingjelly.activation_based.surrogate import ATan  # default surrogate gradient function
+from spikingjelly.activation_based.surrogate import ATan, Sigmoid  # default surrogate gradient function
 from spikingjelly.activation_based import functional
 
 # add project root to Python path to ensure importing src module
@@ -31,16 +31,20 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--device', default='cuda:0', type=str, help='device ID (e.g. cuda:0, cpu)')
     # model parameters
     parser.add_argument('--model', default='resnet18', type=str, help='model name (vgg16, resnet18)')
-    parser.add_argument('--surrogate', default='ATan', type=str, help='surrogate function (ATan, SigmoidPrime, Esser, SuperSpike)')
-    parser.add_argument('--surrogate_beta', default=10.0, type=float, help='beta parameter for surrogate function')
-    parser.add_argument('--T', default=16, type=int, help='time step (length of spike sequence)')
+    parser.add_argument('--surrogate', default='Sigmoid', type=str, help='surrogate function (ATan, SigmoidPrime, Esser, SuperSpike)')
+    parser.add_argument('--surrogate_beta', default=4.0, type=float, help='beta parameter for surrogate function')
+    parser.add_argument('--T', default=4, type=int, help='time step (length of spike sequence)')
     # training hyperparameters
     parser.add_argument('--epochs', default=64, type=int, help='number of training epochs')
-    parser.add_argument('--batch_size', default=256, type=int, help='batch size')
-    parser.add_argument('--lr', default=5e-4, type=float, help='initial learning rate')
+    parser.add_argument('--batch_size', default=128, type=int, help='batch size')
+    parser.add_argument('--optimizer', default='adamw', type=str, help='optimizer (adam, adamw, sgd)')
+    parser.add_argument('--lr', default=1e-3, type=float, help='initial learning rate')
     parser.add_argument('--min_lr', default=1e-6, type=float, help='minimum learning rate (lower bound of cosine annealing)')
+    parser.add_argument('--weight_decay', default=0, type=float, help='weight decay (L2 regularization)')
+    parser.add_argument('--momentum', default=0.9, type=float, help='SGD momentum (only used when optimizer=sgd)')
     parser.add_argument('--grad_clip', default=1.0, type=float, help='gradient clipping threshold (0 means no clipping)')
     parser.add_argument('--patience', default=5, type=int, help='early stopping patience (stop if no improvement for consecutive epochs, 0 means no early stopping)')
+    parser.add_argument('--no_amp', action='store_true', help='disable AMP mixed precision (AMP is only enabled on CUDA by default)')
     # data and log
     parser.add_argument('--data_dir', default='./datasets/CIFAR10', type=str, help='CIFAR10 dataset directory')
     parser.add_argument('--log_dir', default='./logs/cifar10', type=str, help='log directory')
@@ -72,7 +76,7 @@ def train_one_epoch(
         # zero gradients
         optimizer.zero_grad()
         # mixed precision training (accelerate training, reduce memory usage)
-        with torch.cuda.amp.autocast():
+        with torch.cuda.amp.autocast(enabled=(device.type == 'cuda' and (not args.no_amp))):
             # forward propagation: calculate average firing rate
             out_fr = net(img)
             # activation driven loss: MSE loss (minimize the difference between the firing rate and the target one-hot vector)
@@ -90,6 +94,7 @@ def train_one_epoch(
         # calculate current batch accuracy and average loss
         batch_acc, batch_avg_loss = calculate_metrics(out_fr, label, loss)
         total_train_acc += batch_acc * batch_size
+        # batch_avg_loss is already mean loss over batch; weight it by batch_size to get per-sample average later
         total_train_loss += batch_avg_loss * batch_size
 
         # reset neuron state (avoid state accumulation after multi-step training)
@@ -175,6 +180,8 @@ def main(args: argparse.Namespace):
     print("\n=== initialize model ===")
     if args.surrogate == 'ATan':
         surrogate_func = ATan()
+    elif args.surrogate == 'Sigmoid':
+        surrogate_func = Sigmoid(alpha=args.surrogate_beta)
     elif args.surrogate == 'SigmoidPrime':
         surrogate_func = SigmoidPrimeSurrogate(beta=args.surrogate_beta)
     elif args.surrogate == 'Esser':
@@ -203,17 +210,36 @@ def main(args: argparse.Namespace):
     print(f"model parameters: total={total_params:,}, trainable={trainable_params:,}")
 
     # 4. initialize optimizer and learning rate scheduler
-    optimizer = torch.optim.Adam(
-        net.parameters(),
-        lr=args.lr,
-    )
+    opt_name = args.optimizer.lower()
+    if opt_name == 'adam':
+        optimizer = torch.optim.Adam(
+            net.parameters(),
+            lr=args.lr,
+            weight_decay=args.weight_decay
+        )
+    elif opt_name == 'adamw':
+        optimizer = torch.optim.AdamW(
+            net.parameters(),
+            lr=args.lr,
+            weight_decay=args.weight_decay
+        )
+    elif opt_name == 'sgd':
+        optimizer = torch.optim.SGD(
+            net.parameters(),
+            lr=args.lr,
+            momentum=args.momentum,
+            weight_decay=args.weight_decay,
+            nesterov=True
+        )
+    else:
+        raise ValueError(f"Invalid optimizer: {args.optimizer} (expected: adam, adamw, sgd)")
     # cosine annealing learning rate scheduler (decrease learning rate with epoch, but set minimum learning rate to avoid too small)
     lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
         optimizer, T_max=args.epochs, eta_min=args.min_lr
     )
 
     # 5. initialize mixed precision training scaler
-    scaler = GradScaler()
+    scaler = GradScaler(enabled=(device.type == 'cuda' and (not args.no_amp)))
 
     # 6. resume training (if specified checkpoint)
     start_epoch = 0
@@ -230,7 +256,11 @@ def main(args: argparse.Namespace):
         max_test_acc = checkpoint['max_test_acc']
 
     # 7. initialize TensorBoard logs
-    writer = init_tensorboard(log_dir=args.log_dir + f'_{args.model}_{args.surrogate}_beta{args.surrogate_beta}_T{args.T}_lr{args.lr}')
+    writer = init_tensorboard(
+        log_dir=args.log_dir
+        + f'_{args.model}_{args.surrogate}_beta{args.surrogate_beta}_T{args.T}'
+        + f'_{opt_name}_lr{args.lr}_wd{args.weight_decay}'
+    )
 
     # 8. start training loop
     print("\n=== start training ===")
