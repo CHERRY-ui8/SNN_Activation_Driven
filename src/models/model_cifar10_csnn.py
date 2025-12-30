@@ -1,73 +1,159 @@
 """
-CIFAR10数据集的激活驱动卷积脉冲神经网络（CSNN）定义
-适配3通道RGB图像，核心逻辑：以脉冲平均发放率为优化目标
+CIFAR10 CSNN Model Definition
 """
 import torch
 import torch.nn as nn
-from spikingjelly.activation_based import neuron, layer, functional
+from spikingjelly.activation_based import neuron, layer, functional, surrogate
 
-class CIFAR10CSNN(nn.Module):
-    def __init__(self, T: int, channels: int, surrogate_func):
+class CIFAR10VGG16(nn.Module):
+    def __init__(self, T: int, surrogate_func):
         """
         Args:
-            T: 模拟时间步长（脉冲发放的时间序列长度）
-            channels: 第一层卷积的输出通道数
-            surrogate_func: 替代梯度函数（如ATan、SuperSpike等）
+            T: length of the time sequence of pulse emission
+            surrogate_func: surrogate gradient function (e.g. ATan, SuperSpike, etc.)
         """
         super().__init__()
-        self.T = T  # 时间步长，需与数据编码的时间维度匹配
-        self.surrogate_func = surrogate_func  # 替代梯度函数
+        self.T = T  # time step, need to match the time dimension of data encoding
+        self.surrogate_func = surrogate_func  # surrogate gradient function
 
-        # 卷积+全连接网络结构（适配CIFAR10的32×32×3输入）
-        self.conv_fc = nn.Sequential(
-            # 卷积层1：3→channels，3×3卷积， padding=1，输出32×32
-            layer.Conv2d(3, channels, kernel_size=3, padding=1, bias=False),
-            layer.BatchNorm2d(channels),  # 批归一化，加速收敛
-            neuron.IFNode(surrogate_function=self.surrogate_func),  # 脉冲神经元
-            layer.MaxPool2d(2, 2),  # 下采样，输出16×16
+        # convolution + fully connected network structure (adapted to 32×32×3 input of CIFAR10)
+        # VGG16-like structure
+        def conv_block(in_channels, out_channels, num_convs):
+            layers = []
+            for _ in range(num_convs):
+                layers.append(layer.Conv2d(in_channels, out_channels, kernel_size=3, padding=1, bias=False))
+                layers.append(layer.BatchNorm2d(out_channels))
+                layers.append(neuron.LIFNode(surrogate_function=self.surrogate_func)) # replace ReLU
+                in_channels = out_channels
+            # use avg pool instead of max pool for SNN
+            layers.append(layer.AvgPool2d(2, 2))
+            return nn.Sequential(*layers)
 
-            # 卷积层2：channels→2*channels，3×3卷积， padding=1，输出16×16
-            layer.Conv2d(channels, 2 * channels, kernel_size=3, padding=1, bias=False),
-            layer.BatchNorm2d(2 * channels),
-            neuron.IFNode(surrogate_function=self.surrogate_func),
-            layer.MaxPool2d(2, 2),  # 下采样，输出8×8
-
-            # 卷积层3：2*channels→4*channels，3×3卷积， padding=1，输出8×8
-            layer.Conv2d(2 * channels, 4 * channels, kernel_size=3, padding=1, bias=False),
-            layer.BatchNorm2d(4 * channels),
-            neuron.IFNode(surrogate_function=self.surrogate_func),
-            layer.MaxPool2d(2, 2),  # 下采样，输出4×4
-
-            # 全连接层1：4*channels×4×4 → 128
-            layer.Flatten(),  # 展平：4*channels×4×4 = 64*channels
-            layer.Linear(4 * channels * 4 * 4, 128, bias=False),
-            neuron.IFNode(surrogate_function=self.surrogate_func),
-
-            # 全连接层2：128→10（CIFAR10共10类）
-            layer.Linear(128, 10, bias=False),
-            neuron.IFNode(surrogate_function=self.surrogate_func)
+        # stack VGG16-like structure
+        self.features = nn.Sequential(
+            conv_block(3, 64, 2),
+            conv_block(64, 128, 2),
+            conv_block(128, 256, 3),
+            conv_block(256, 512, 3),
+            conv_block(512, 512, 3)
+        )
+        
+        self.classifier = nn.Sequential(
+            layer.Flatten(),
+            # for low resolution input (32x32), the output of the last convolution layer is 512
+            layer.Linear(512, 512),
+            neuron.LIFNode(surrogate_function=self.surrogate_func),
+            layer.Linear(512, 512),
+            neuron.LIFNode(surrogate_function=self.surrogate_func),
+            layer.Linear(512, 10)
         )
 
-        # 设置多步模式（m-step），适配时间序列输入
+        # set multi-step mode (m-step) to adapt to time sequence input
         functional.set_step_mode(self, step_mode='m')
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
-        前向传播：输入静态图像→扩展时间维度→脉冲序列输出→计算平均发放率
+        forward propagation: input static image → expand time dimension → spike sequence output → calculate average firing rate
         Args:
-            x: 静态图像张量，shape=[N, 3, 32, 32]（N=批量大小）
+            x: static image tensor, shape=[N, 3, 32, 32] (N=batch size)
         Returns:
-            fr: 输出层平均脉冲发放率，shape=[N, 10]
+            fr: average firing rate of output layer, shape=[N, 10]
         """
-        # 扩展时间维度：[N,3,32,32] → [T, N, 3, 32, 32]（多步输入）
+        # expand time dimension: [N,3,32,32] → [T, N, 3, 32, 32] (multi-step input)
         x_seq = x.unsqueeze(0).repeat(self.T, 1, 1, 1, 1)
-        # 脉冲序列前向传播
-        x_seq_out = self.conv_fc(x_seq)
-        # 计算时间维度的平均发放率（激活驱动核心：以发放率为优化目标）
-        fr = x_seq_out.mean(dim=0)  # 对时间步T求平均，shape=[N,10]
+        # spike sequence forward propagation
+        x_seq_out = self.features(x_seq)
+        x_seq_out = self.classifier(x_seq_out)
+        # calculate average firing rate of time dimension (activation driven core: optimize with firing rate)
+        fr = x_seq_out.mean(dim=0)  # average over time step T, shape=[N,10]
         return fr
 
-    def reset(self):
-        """重置神经元状态（多步训练后需重置，避免状态累积）"""
-        # 只重置子模块，避免递归调用
-        functional.reset_net(self.conv_fc)
+class SpikingBasicBlock(nn.Module):
+    """
+    Basic Residual Connection Block
+    """
+    def __init__(self, in_channels, out_channels, stride=1, surrogate_func=surrogate.ATan()):
+        super().__init__()
+        self.conv1 = layer.Conv2d(in_channels, out_channels, kernel_size=3, stride=stride, padding=1, bias=False)
+        self.bn1 = layer.BatchNorm2d(out_channels)
+        self.sn1 = neuron.LIFNode(surrogate_function=surrogate_func)
+        
+        self.conv2 = layer.Conv2d(out_channels, out_channels, kernel_size=3, stride=1, padding=1, bias=False)
+        self.bn2 = layer.BatchNorm2d(out_channels)
+        self.sn2 = neuron.LIFNode(surrogate_function=surrogate_func)
+
+        self.shortcut = nn.Sequential()
+        if stride != 1 or in_channels != out_channels:
+            self.shortcut = nn.Sequential(
+                layer.Conv2d(in_channels, out_channels, kernel_size=1, stride=stride, bias=False),
+                layer.BatchNorm2d(out_channels)
+            )
+
+    def forward(self, x):
+        # x shape: [T, N, C, H, W]
+        identity = self.shortcut(x)
+        
+        out = self.conv1(x)
+        out = self.bn1(out)
+        out = self.sn1(out)
+        
+        out = self.conv2(out)
+        out = self.bn2(out)
+        
+        out = out + identity
+        out = self.sn2(out)
+        return out
+
+class CIFAR10ResNet18(nn.Module):
+    """
+    CIFAR10 ResNet-18 Model
+    """
+    def __init__(self, T: int, surrogate_func=surrogate.ATan(), num_classes=10):
+        super().__init__()
+        self.T = T
+        self.in_channels = 64
+
+        # initial layer: for 32x32, remove the MaxPool of standard ResNet
+        self.prep = nn.Sequential(
+            layer.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False),
+            layer.BatchNorm2d(64),
+            neuron.LIFNode(surrogate_function=surrogate_func)
+        )
+
+        # 4 layers, each layer has 2 blocks
+        self.layer1 = self._make_layer(64, 2, 1, surrogate_func)
+        self.layer2 = self._make_layer(128, 2, 2, surrogate_func)
+        self.layer3 = self._make_layer(256, 2, 2, surrogate_func)
+        self.layer4 = self._make_layer(512, 2, 2, surrogate_func)
+
+        self.classifier = nn.Sequential(
+            layer.AdaptiveAvgPool2d((1, 1)),
+            layer.Flatten(),
+            layer.Linear(512, num_classes)
+        )
+
+        # set multi-step mode (m-step) to adapt to time sequence input
+        functional.set_step_mode(self, step_mode='m')
+
+    def _make_layer(self, out_channels, num_blocks, stride, surrogate_func):
+        strides = [stride] + [1] * (num_blocks - 1)
+        layers = []
+        for s in strides:
+            layers.append(SpikingBasicBlock(self.in_channels, out_channels, s, surrogate_func))
+            self.in_channels = out_channels
+        return nn.Sequential(*layers)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # 1. expand time dimension: [N, 3, 32, 32] -> [T, N, 3, 32, 32]
+        x_seq = x.unsqueeze(0).repeat(self.T, 1, 1, 1, 1)
+        
+        # 2. forward propagation
+        x_seq = self.prep(x_seq)
+        x_seq = self.layer1(x_seq)
+        x_seq = self.layer2(x_seq)
+        x_seq = self.layer3(x_seq)
+        x_seq = self.layer4(x_seq)
+        x_seq = self.classifier(x_seq)
+        
+        # 3. calculate average value as prediction result
+        return x_seq.mean(dim=0)

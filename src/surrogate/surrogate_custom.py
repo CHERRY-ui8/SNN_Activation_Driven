@@ -1,10 +1,8 @@
 """
-论文"The remarkable robustness of surrogate gradient learning..." 4.2.6节要求的3种替代梯度函数
-包含：Sigmoid、Esser（分段线性）、SuperSpike（渐近变体）
-继承spikingjelly的SurrogateFunctionBase基类，保证接口统一
+Three Surrogate Functions from paper: "The remarkable robustness of surrogate gradient learning..."
+Sigmoid (prime), Esser (piecewise linear), SuperSpike
 """
 import torch
-import math
 from spikingjelly.activation_based.surrogate import SurrogateFunctionBase, heaviside
 
 

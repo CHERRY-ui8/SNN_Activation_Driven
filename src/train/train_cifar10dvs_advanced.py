@@ -173,11 +173,11 @@ def train_preprocess_method(
         epoch_time = time.time() - epoch_start
         total_train_time += epoch_time
         
-        if (epoch + 1) % 5 == 0 or epoch == 0:
-            print(f"Epoch [{epoch+1}/{args.epochs}] - "
-                  f"Train Loss: {train_loss:.6f}, Train Acc: {train_acc:.4f}, "
-                  f"Test Loss: {test_loss:.6f}, Test Acc: {test_acc:.4f}, "
-                  f"Max Test Acc: {max_test_acc:.4f}")
+        # if (epoch + 1) % 5 == 0 or epoch == 0:
+        print(f"Epoch [{epoch+1}/{args.epochs}] - "
+                f"Train Loss: {train_loss:.6f}, Train Acc: {train_acc:.4f}, "
+                f"Test Loss: {test_loss:.6f}, Test Acc: {test_acc:.4f}, "
+                f"Max Test Acc: {max_test_acc:.4f}")
     
     writer.close()
     
@@ -198,14 +198,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--device', type=str, default='cuda:0', help='设备ID')
     parser.add_argument('--frame_num', type=int, default=16, help='帧数（时间步长T）')
     parser.add_argument('--channels', type=int, default=32, help='第一层卷积输出通道数')
-    parser.add_argument('--epochs', type=int, default=32, help='训练轮次')
-    parser.add_argument('--batch_size', type=int, default=32, help='批量大小')
+    parser.add_argument('--epochs', type=int, default=64, help='训练轮次')
+    parser.add_argument('--batch_size', type=int, default=128, help='批量大小')
     parser.add_argument('--lr', type=float, default=0.1, help='初始学习率')
-    parser.add_argument('--data_dir', type=str, default='./data/CIFAR10DVS', help='数据集目录')
+    parser.add_argument('--data_dir', type=str, default='./datasets/CIFAR10DVS', help='数据集目录')
     parser.add_argument('--log_dir', type=str, default='./logs/cifar10dvs_advanced', help='日志目录')
     parser.add_argument('--save_result', type=str, default='./results/cifar10dvs_advanced_preprocess_compare.csv',
                        help='预处理对比结果CSV')
-    parser.add_argument('--methods', type=str, default='baseline,count_norm,time_surface,adaptive_norm',
+    parser.add_argument('--methods', type=str, default='count_norm',
                        help='要对比的预处理方法（逗号分隔）')
     return parser.parse_args()
 

@@ -19,7 +19,7 @@ if project_root not in sys.path:
 # 导入自定义模块
 from src.models.model_cifar10dvs_csnn import CIFAR10DVSCSNN
 from src.data.data_cifar10dvs import load_cifar10dvs
-from src.surrogate.surrogate_custom import SuperSpikeSurrogate  # 假设SuperSpike是最优（可替换）
+from src.surrogate.surrogate_custom import EsserSurrogate  # 假设SuperSpike是最优（可替换）
 from src.utils.utils import get_device, init_tensorboard, save_checkpoint, calculate_metrics
 
 def parse_args() -> argparse.Namespace:
@@ -28,12 +28,13 @@ def parse_args() -> argparse.Namespace:
     # 设备与训练参数
     parser.add_argument('--device', default='cuda:0', type=str, help='设备ID')
     parser.add_argument('--frame_num', default=16, type=int, help='DVS切分的帧数（时间步长T）')
-    parser.add_argument('--epochs', default=32, type=int, help='训练轮次')
+    parser.add_argument('--epochs', default=64, type=int, help='训练轮次')
     parser.add_argument('--batch_size', default=32, type=int, help='批量大小（DVS数据较大，建议 smaller）')
     parser.add_argument('--lr', default=0.05, type=float, help='初始学习率')
+    parser.add_argument('--grad_clip', default=1.0, type=float, help='梯度裁剪阈值（0表示不裁剪）')
     parser.add_argument('--channels', default=16, type=int, help='第一层卷积通道数')
     # 数据与预处理
-    parser.add_argument('--data_dir', default='./data/CIFAR10DVS', type=str, help='CIFAR10DVS目录')
+    parser.add_argument('--data_dir', default='./datasets/CIFAR10DVS', type=str, help='CIFAR10DVS目录')
     parser.add_argument('--split_modes', default='number,time', type=str, help='预处理方式（逗号分隔：number/time）')
     # 日志与结果
     parser.add_argument('--log_dir', default='./logs/cifar10dvs_train', type=str, help='日志目录')
@@ -64,7 +65,7 @@ def train_dvs_split_mode(
     )
 
     # 2. 初始化模型（使用最优替代梯度，此处假设SuperSpike）
-    surrogate_func = SuperSpikeSurrogate(beta=2.0)
+    surrogate_func = EsserSurrogate(beta=1)
     net = CIFAR10DVSCSNN(
         T=T,
         channels=args.channels,
@@ -83,7 +84,7 @@ def train_dvs_split_mode(
         momentum=0.9,
         weight_decay=5e-4
     )
-    lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
+    lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs, eta_min=1e-3)
 
     # 4. 混合精度缩放器
     scaler = GradScaler()
@@ -122,7 +123,7 @@ def train_dvs_split_mode(
             
             # 梯度裁剪：防止梯度爆炸
             scaler.unscale_(optimizer)
-            torch.nn.utils.clip_grad_norm_(net.parameters(), max_norm=1.0)
+            torch.nn.utils.clip_grad_norm_(net.parameters(), max_norm=args.grad_clip)
             scaler.step(optimizer)
             scaler.update()
 

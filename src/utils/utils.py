@@ -1,6 +1,6 @@
 """
-通用工具函数：日志初始化、模型保存/加载、设备选择、指标计算
-所有训练脚本可复用此文件的函数，减少代码冗余
+General utility functions: log initialization, model saving/loading, device selection, metric calculation
+All training scripts can reuse the functions in this file to reduce code redundancy
 """
 import os
 import torch
@@ -10,34 +10,34 @@ from typing import Optional, Dict
 
 def get_device(device_id: str = 'cuda:0') -> torch.device:
     """
-    自动选择设备（优先GPU，无GPU则用CPU）
+    automatically select device (prefer GPU, use CPU if no GPU)
     Args:
-        device_id: GPU设备ID（如'cuda:0'）
+        device_id: GPU device ID (e.g. 'cuda:0')
     Returns:
-        device: 最终使用的设备
+        device: the final selected device
     """
     if torch.cuda.is_available() and 'cuda' in device_id:
         device = torch.device(device_id)
-        print(f"使用GPU设备：{device_id}（共{torch.cuda.device_count()}个GPU）")
+        print(f"Using GPU device: {device_id} (total {torch.cuda.device_count()} GPUs)")
     else:
         device = torch.device('cpu')
-        print("GPU不可用，使用CPU设备")
+        print("GPU not available, using CPU device")
     return device
 
 def init_tensorboard(log_dir: str = './logs') -> SummaryWriter:
     """
-    初始化TensorBoard日志（按时间戳创建子目录，避免覆盖）
+    initialize TensorBoard log (create subdirectory with timestamp to avoid overwriting)
     Args:
-        log_dir: 日志根目录
+        log_dir: log root directory
     Returns:
-        writer: TensorBoard SummaryWriter对象
+        writer: TensorBoard SummaryWriter object
     """
-    # 按当前时间创建子目录（格式：YYYYMMDD_HHMMSS）
+    # create subdirectory with timestamp (format: YYYYMMDD_HHMMSS)
     time_str = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
     tb_dir = os.path.join(log_dir, time_str)
     os.makedirs(tb_dir, exist_ok=True)
     writer = SummaryWriter(tb_dir)
-    print(f"TensorBoard日志目录：{tb_dir}（运行 tensorboard --logdir {tb_dir} 查看）")
+    print(f"TensorBoard log directory: {tb_dir} (run tensorboard --logdir {tb_dir} to view)")
     return writer
 
 def save_checkpoint(
@@ -49,33 +49,33 @@ def save_checkpoint(
     is_best: bool = False
 ) -> None:
     """
-    保存模型 checkpoint（含网络参数、优化器状态、当前epoch、最优准确率）
+    save model checkpoint (contains network parameters, optimizer state, current epoch, best accuracy)
     Args:
-        net: 训练的网络模型
-        optimizer: 优化器
-        epoch: 当前训练轮次
-        max_test_acc: 目前为止的最大测试准确率
-        save_path: 保存目录
-        is_best: 是否为当前最优模型（若为True，额外保存为best.pth）
+        net: trained network model
+        optimizer: optimizer
+        epoch: current training epoch
+        max_test_acc: best test accuracy so far
+        save_path: save directory
+        is_best: whether the current model is the best model (if True, save as best.pth)
     """
-    # 创建保存目录
+    # create save directory
     os.makedirs(save_path, exist_ok=True)
-    # checkpoint内容
+    # checkpoint content
     checkpoint = {
-        'net_state_dict': net.state_dict(),  # 网络参数
-        'optimizer_state_dict': optimizer.state_dict(),  # 优化器状态
-        'epoch': epoch,  # 当前epoch
-        'max_test_acc': max_test_acc  # 最大测试准确率
+        'net_state_dict': net.state_dict(),  # network parameters
+        'optimizer_state_dict': optimizer.state_dict(),  # optimizer state
+        'epoch': epoch,  # current training epoch
+        'max_test_acc': max_test_acc  # best test accuracy so far
     }
-    # 保存最新模型
+    # save latest model
     latest_path = os.path.join(save_path, 'latest.pth')
     torch.save(checkpoint, latest_path)
-    print(f"已保存最新模型到：{latest_path}")
-    # 若为最优模型，额外保存
+    print(f"Saved latest model to: {latest_path}")
+    # if the current model is the best model, save as best.pth
     if is_best:
         best_path = os.path.join(save_path, 'best.pth')
         torch.save(checkpoint, best_path)
-        print(f"已保存最优模型到：{best_path}（准确率：{max_test_acc:.4f}）")
+        print(f"Saved best model to: {best_path} (accuracy: {max_test_acc:.4f})")
 
 def load_checkpoint(
     net: torch.nn.Module,
@@ -84,25 +84,25 @@ def load_checkpoint(
     device: torch.device
 ) -> Dict:
     """
-    加载模型 checkpoint（恢复训练状态）
+    load model checkpoint (restore training state)
     Args:
-        net: 待加载参数的网络
-        optimizer: 待恢复状态的优化器（可为None，仅加载网络参数）
-        checkpoint_path: checkpoint文件路径
-        device: 加载到的设备
+        net: network model to load parameters
+        optimizer: optimizer to restore state (can be None, only load network parameters)
+        checkpoint_path: checkpoint file path
+        device: device to load the checkpoint
     Returns:
-        checkpoint: 加载的checkpoint字典（含epoch、max_test_acc等）
+        checkpoint: loaded checkpoint dictionary (contains epoch, max_test_acc, etc.)
     """
     if not os.path.exists(checkpoint_path):
-        raise FileNotFoundError(f"Checkpoint文件不存在：{checkpoint_path}")
-    # 加载checkpoint（映射到指定设备）
+        raise FileNotFoundError(f"Checkpoint file not found: {checkpoint_path}")
+    # load checkpoint (map to specified device)
     checkpoint = torch.load(checkpoint_path, map_location=device)
-    # 加载网络参数
+    # load network parameters
     net.load_state_dict(checkpoint['net_state_dict'])
-    # 加载优化器状态（若传入optimizer）
+    # load optimizer state (if optimizer is not None)
     if optimizer is not None and 'optimizer_state_dict' in checkpoint:
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-    print(f"已加载checkpoint：{checkpoint_path}（恢复到epoch {checkpoint['epoch']}，最优准确率 {checkpoint['max_test_acc']:.4f}）")
+    print(f"Loaded checkpoint: {checkpoint_path} (restored to epoch {checkpoint['epoch']}, best accuracy {checkpoint['max_test_acc']:.4f})")
     return checkpoint
 
 def calculate_metrics(
@@ -111,19 +111,19 @@ def calculate_metrics(
     loss: torch.Tensor
 ) -> tuple[float, float]:
     """
-    计算当前批量的准确率和平均损失
+    calculate current batch accuracy and average loss
     Args:
-        out_fr: 网络输出的平均发放率（shape=[N,10]）
-        label: 真实标签（shape=[N]）
-        loss: 当前批量的损失（标量）
+        out_fr: average firing rate of network output (shape=[N,10])
+        label: true labels (shape=[N])
+        loss: current batch loss (scalar)
     Returns:
-        acc: 准确率（0~1）
-        avg_loss: 平均损失（损失/批量大小）
+        acc: accuracy (0~1)
+        avg_loss: average loss (loss/batch size)
     """
-    batch_size = label.numel()  # 批量大小
-    # 计算准确率：预测类别=发放率最大的类别
-    pred = out_fr.argmax(dim=1)  # 预测类别，shape=[N]
-    acc = (pred == label).float().sum().item() / batch_size  # 准确率
-    # 计算平均损失
-    avg_loss = loss.item() / batch_size  # 损失除以批量大小
+    batch_size = label.numel()  # batch size
+    # calculate accuracy: predicted class = class with highest firing rate
+    pred = out_fr.argmax(dim=1)  # predicted class, shape=[N]
+    acc = (pred == label).float().sum().item() / batch_size  # accuracy
+    # calculate average loss
+    avg_loss = loss.item() / batch_size  # loss divided by batch size
     return acc, avg_loss
