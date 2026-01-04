@@ -49,6 +49,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--data_dir', default='./datasets/CIFAR10', type=str, help='CIFAR10 dataset directory')
     parser.add_argument('--log_dir', default='./logs/cifar10', type=str, help='log directory')
     parser.add_argument('--resume', default='', type=str, help='checkpoint path for resuming training (optional)')
+    parser.add_argument('--strong_aug', action='store_true', help='use strong data augmentation (ColorJitter + RandomErasing)')
+    parser.add_argument('--autoaug', action='store_true', help='use AutoAugment policy (strongest augmentation, overrides --strong_aug)')
     return parser.parse_args()
 
 def train_one_epoch(
@@ -171,9 +173,15 @@ def main(args: argparse.Namespace):
 
     # 2. load data
     print("\n=== load CIFAR10 dataset ===")
+    if args.autoaug:
+        print("Using AutoAugment (strongest augmentation policy)")
+    elif args.strong_aug:
+        print("Using strong data augmentation (ColorJitter + RandomErasing)")
     train_loader, test_loader = load_cifar10(
         batch_size=args.batch_size,
-        data_dir=args.data_dir
+        data_dir=args.data_dir,
+        use_strong_aug=args.strong_aug,
+        use_autoaug=args.autoaug
     )
 
     # 3. initialize model (default use ATan surrogate gradient function)
