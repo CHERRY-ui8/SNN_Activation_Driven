@@ -1,13 +1,3 @@
-"""
-训练结果分析脚本
-
-用于分析CIFAR数据集上的训练结果，包括：
-1. 准确率曲线
-2. 损失曲线
-3. 混淆矩阵可视化
-4. 各类别性能分析
-"""
-
 import os
 import torch
 import numpy as np

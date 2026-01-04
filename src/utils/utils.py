@@ -1,6 +1,5 @@
 """
-General utility functions: log initialization, model saving/loading, device selection, metric calculation
-All training scripts can reuse the functions in this file to reduce code redundancy
+General utility functions
 """
 import os
 import torch
@@ -9,13 +8,6 @@ from torch.utils.tensorboard import SummaryWriter
 from typing import Optional, Dict
 
 def get_device(device_id: str = 'cuda:0') -> torch.device:
-    """
-    automatically select device (prefer GPU, use CPU if no GPU)
-    Args:
-        device_id: GPU device ID (e.g. 'cuda:0')
-    Returns:
-        device: the final selected device
-    """
     if torch.cuda.is_available() and 'cuda' in device_id:
         device = torch.device(device_id)
         print(f"Using GPU device: {device_id} (total {torch.cuda.device_count()} GPUs)")
@@ -25,19 +17,11 @@ def get_device(device_id: str = 'cuda:0') -> torch.device:
     return device
 
 def init_tensorboard(log_dir: str = './logs') -> SummaryWriter:
-    """
-    initialize TensorBoard log (create subdirectory with timestamp to avoid overwriting)
-    Args:
-        log_dir: log root directory
-    Returns:
-        writer: TensorBoard SummaryWriter object
-    """
-    # create subdirectory with timestamp (format: YYYYMMDD_HHMMSS)
     time_str = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
     tb_dir = os.path.join(log_dir, time_str)
     os.makedirs(tb_dir, exist_ok=True)
     writer = SummaryWriter(tb_dir)
-    print(f"TensorBoard log directory: {tb_dir} (run tensorboard --logdir {tb_dir} to view)")
+    print(f"TensorBoard log directory: {tb_dir}")
     return writer
 
 def save_checkpoint(
@@ -48,30 +32,16 @@ def save_checkpoint(
     save_path: str,
     is_best: bool = False
 ) -> None:
-    """
-    save model checkpoint (contains network parameters, optimizer state, current epoch, best accuracy)
-    Args:
-        net: trained network model
-        optimizer: optimizer
-        epoch: current training epoch
-        max_test_acc: best test accuracy so far
-        save_path: save directory
-        is_best: whether the current model is the best model (if True, save as best.pth)
-    """
-    # create save directory
     os.makedirs(save_path, exist_ok=True)
-    # checkpoint content
     checkpoint = {
-        'net_state_dict': net.state_dict(),  # network parameters
-        'optimizer_state_dict': optimizer.state_dict(),  # optimizer state
-        'epoch': epoch,  # current training epoch
-        'max_test_acc': max_test_acc  # best test accuracy so far
+        'net_state_dict': net.state_dict(),
+        'optimizer_state_dict': optimizer.state_dict(),
+        'epoch': epoch,
+        'max_test_acc': max_test_acc
     }
-    # save latest model
     latest_path = os.path.join(save_path, 'latest.pth')
     torch.save(checkpoint, latest_path)
     print(f"Saved latest model to: {latest_path}")
-    # if the current model is the best model, save as best.pth
     if is_best:
         best_path = os.path.join(save_path, 'best.pth')
         torch.save(checkpoint, best_path)
@@ -83,26 +53,13 @@ def load_checkpoint(
     checkpoint_path: str,
     device: torch.device
 ) -> Dict:
-    """
-    load model checkpoint (restore training state)
-    Args:
-        net: network model to load parameters
-        optimizer: optimizer to restore state (can be None, only load network parameters)
-        checkpoint_path: checkpoint file path
-        device: device to load the checkpoint
-    Returns:
-        checkpoint: loaded checkpoint dictionary (contains epoch, max_test_acc, etc.)
-    """
     if not os.path.exists(checkpoint_path):
         raise FileNotFoundError(f"Checkpoint file not found: {checkpoint_path}")
-    # load checkpoint (map to specified device)
     checkpoint = torch.load(checkpoint_path, map_location=device)
-    # load network parameters
     net.load_state_dict(checkpoint['net_state_dict'])
-    # load optimizer state (if optimizer is not None)
     if optimizer is not None and 'optimizer_state_dict' in checkpoint:
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-    print(f"Loaded checkpoint: {checkpoint_path} (restored to epoch {checkpoint['epoch']}, best accuracy {checkpoint['max_test_acc']:.4f})")
+    print(f"Loaded checkpoint: {checkpoint_path} (epoch {checkpoint['epoch']}, acc {checkpoint['max_test_acc']:.4f})")
     return checkpoint
 
 def calculate_metrics(
@@ -110,19 +67,6 @@ def calculate_metrics(
     label: torch.Tensor,
     loss: torch.Tensor
 ) -> tuple[float, float]:
-    """
-    calculate current batch accuracy and average loss
-    Args:
-        out_fr: average firing rate of network output (shape=[N,10])
-        label: true labels (shape=[N])
-        loss: current batch loss (scalar)
-    Returns:
-        acc: accuracy (0~1)
-        avg_loss: average loss (per-batch mean loss)
-    """
-    # calculate accuracy: predicted class = class with highest firing rate
-    pred = out_fr.argmax(dim=1)  # predicted class, shape=[N]
-    acc = (pred == label).float().mean().item()  # accuracy
-    # NOTE: torch loss functions like CrossEntropyLoss default to reduction='mean'
-    # so loss.item() is already the mean loss over the batch.
+    pred = out_fr.argmax(dim=1)
+    acc = (pred == label).float().mean().item()
     return acc, loss.item()

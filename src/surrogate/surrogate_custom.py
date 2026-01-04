@@ -1,6 +1,5 @@
 """
-Three Surrogate Functions from paper: "The remarkable robustness of surrogate gradient learning..."
-Sigmoid (prime), Esser (piecewise linear), SuperSpike
+Surrogate gradient functions: SigmoidPrime, Esser, SuperSpike
 """
 import torch
 from spikingjelly.activation_based.surrogate import SurrogateFunctionBase, heaviside
@@ -59,10 +58,6 @@ class SuperSpikeSurrogateFunction(torch.autograd.Function):
         return superspike_backward(grad_output, x, beta)
 
 class SuperSpikeSurrogate(SurrogateFunctionBase):
-    """
-    SuperSpike surrogate function: g'(x) = 1 / (|x|·β + 1)^2
-    Corresponding primitive function: g(x) = (1 + βx / (1 + β|x|)) / β
-    """
     def __init__(self, beta: float = 10.0, spiking: bool = True):
         super().__init__(beta, spiking)
         self.beta = beta
@@ -103,10 +98,6 @@ class SigmoidPrimeSurrogateFunction(torch.autograd.Function):
         return sigmoid_prime_backward(grad_output, x, beta)
 
 class SigmoidPrimeSurrogate(SurrogateFunctionBase):
-    """
-    Sigmoid surrogate function: g'(x) = s(x)·(1-s(x))
-    Corresponding primitive function: g(x) = sigmoid(βx) / β
-    """
     def __init__(self, beta: float = 10.0, spiking: bool = True):
         super().__init__(beta, spiking)
         self.beta = beta
@@ -146,10 +137,6 @@ class EsserSurrogateFunction(torch.autograd.Function):
         return esser_backward(grad_output, x, beta)
 
 class EsserSurrogate(SurrogateFunctionBase):
-    """
-    Esser surrogate function: g'(x) = max(0, 1 - β·|x|)
-    Corresponding primitive function: g(x) = If(x < -1/beta, 0, x < 0, 0.5 * beta^2 * (x + 1/beta)^2, x < 1/beta, 1 - 0.5 * beta^2 * (x - 1/beta)^2, 1)
-    """
     def __init__(self, beta: float = 10.0, spiking: bool = True):
         super().__init__(beta, spiking)
         self.beta = beta

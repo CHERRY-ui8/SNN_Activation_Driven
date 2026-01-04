@@ -3,7 +3,6 @@ import os
 import global_v as glv
 from torch.utils.cpp_extension import load
 
-# 获取当前文件所在目录（my_implementation/layers/）
 _current_dir = os.path.dirname(os.path.abspath(__file__))
 
 try:
